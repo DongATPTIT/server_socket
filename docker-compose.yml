@@ -1,0 +1,49 @@
+version: '3.8'
+
+services:
+  # redis------------------------------------
+  redis:
+    image: redis:6.2.5-alpine
+    restart: always
+    ports:
+      - ${REDIS_PORT}:6379
+    command: redis-server /usr/local/etc/redis/redis.conf --requirepass ${REDIS_PASSWORD}
+    volumes:
+      - ./docker/redis/redis.conf:/usr/local/etc/redis/redis.conf
+    env_file:
+      - .env
+
+  # mysql------------------------------------------
+  mysql:
+    image: mysql:8.0
+    restart: always
+    volumes:
+      - mysql:/var/lib/mysql
+    environment:
+      # MYSQL_ROOT_PASSWORD: "Dong10052002@"
+      MYSQL_USER: ${USER_NAME}
+      MYSQL_PASSWORD: ${DB_PASSWORD}
+      MYSQL_DATABASE: ${DB_NAME}
+    ports:
+      - ${db_port}:3306
+    env_file:
+      - .env
+    networks:
+      - sql
+  # rabbit --------------------------------
+  rabbitmq:
+    image: rabbitmq:management
+    container_name: rabbitmq
+    environment:
+      - ${RABBITMQ_DEFAULT_USER}
+      - ${RABBITMQ_DEFAULT_PASS}
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+networks:
+  sql:
+    external: true
+volumes:
+  mysql:
+  redis:
+    driver: local
