@@ -7,6 +7,7 @@ import mongoose, { Model } from "mongoose";
 import { Redis } from "ioredis";
 import { InjectRedis } from "@nestjs-modules/ioredis";
 import { PayloadMessage } from "src/dto/payload-message.dto";
+import { RedisService } from "src/redis/redis.service";
 @WebSocketGateway({
     cors: {
         origin: '*',
@@ -16,14 +17,13 @@ export class SocketGateway
     implements OnGatewayInit, OnGatewayConnection, OnGatewayDisconnect {
     constructor(
         @InjectModel(RoomChatMessage.name) private RoomChat: Model<RoomChatMessage>,
-        @InjectRedis() private readonly redis: Redis,
+        private readonly redisService: RedisService
     ) { }
 
     @WebSocketServer() server: Server;
     async handleConnection(client: Socket) {
         const token = client.handshake?.headers?.token;
-        console.log(token);
-        axios.get(`http://10.10.150.57:3000/auth/check-auth-token`, {
+        axios.get(`${process.env.URL}/auth/check-auth-token`, {
             headers: {
                 'Authorization': `Bearer ${token}`
             }
@@ -31,21 +31,16 @@ export class SocketGateway
             .then(async (res) => {
                 client.data = { username: res.data?.username };
                 client.connected;
-                console.log(client.data.username)
                 const rooms = await this.RoomChat.find({ usernames: { $in: [client.data.username] } })
 
                 const roomName = rooms.map(room => room._id.toString());
                 let messageOnRooms = {}
                 for (const room of roomName) {
                     client.join(room);
-                    // client.on('chat', (message) => {
-                    //     console.log(message)
-                    // })
-                    const messageRoomOnRedis = await this.redis.get(room);
+                    const messageRoomOnRedis = this.redisService.getRoomByKey(room);
                     const messageOnDb = await this.RoomChat.findById(room)
                     messageOnRooms[room] = messageOnRooms ? messageRoomOnRedis : messageOnDb.messages;
                 }
-                console.log(messageOnRooms)
                 console.log(`Client connected: ${client.id}`);
                 return messageOnRooms
             })
@@ -63,21 +58,15 @@ export class SocketGateway
     }
     @SubscribeMessage('chat')
     async handleSendMessage(client: Socket, payload: PayloadMessage): Promise<void> {
-
-        console.log({
-            msg: `username: ${client.data.username}`,
-            content: payload.content,
-            room: payload.roomName
-        });
         client.to(payload.roomName).emit('chat', {
             payload
         });
-        const oldMessages = await this.redis.get(payload.roomName);
+        const messageSended = this.redisService.getRoomByKey(payload.roomName);
 
-        let messages = [];
+        let allMessage = [];
 
-        if (oldMessages) {
-            messages.push(await this.redis.get(payload.roomName));
+        if (messageSended) {
+            allMessage.push(messageSended);
         }
         const newMessage = {
             _id: new mongoose.Types.ObjectId(),
@@ -85,11 +74,10 @@ export class SocketGateway
             message: payload.content,
             timestamp: new Date()
         };
-        messages.push(newMessage);
+        allMessage.push(newMessage);
 
-        await this.redis.set(payload.roomName, JSON.stringify(messages));
+        this.redisService.SetMessageByKey(payload.roomName, JSON.stringify(allMessage));
 
-        console.log(await this.redis.get(payload.roomName));
 
     }
 
